@@ -6,12 +6,30 @@
 #include <vector>
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
 
 namespace robot_arm_kinematics
 {
 
 using Vector6d = Eigen::Matrix<double, 6, 1>;
 using Matrix6d = Eigen::Matrix<double, 6, 6>;
+
+struct DualQuaternion
+{
+  Eigen::Quaterniond real{Eigen::Quaterniond::Identity()};
+  Eigen::Quaterniond dual{0.0, 0.0, 0.0, 0.0};
+
+  static DualQuaternion identity();
+  static DualQuaternion fromTransform(const Eigen::Matrix4d & transform);
+  static DualQuaternion fromRotationTranslation(
+    const Eigen::Quaterniond & rotation,
+    const Eigen::Vector3d & translation);
+
+  DualQuaternion normalized() const;
+  DualQuaternion operator*(const DualQuaternion & other) const;
+  Eigen::Matrix4d toTransform() const;
+  Eigen::Vector3d translation() const;
+};
 
 struct IkResult
 {
@@ -29,6 +47,7 @@ public:
   SixAxisArmKinematics();
 
   Eigen::Matrix4d forward(const Vector6d & q) const;
+  DualQuaternion forwardDualQuaternion(const Vector6d & q) const;
   IkResult inverse(const Eigen::Matrix4d & target, const Vector6d & seed) const;
   std::vector<Vector6d> quinticTrajectory(
     const Vector6d & start,
@@ -59,4 +78,3 @@ private:
 }  // namespace robot_arm_kinematics
 
 #endif  // ROBOT_ARM_KINEMATICS__KINEMATICS_HPP_
-

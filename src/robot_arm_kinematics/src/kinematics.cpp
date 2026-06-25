@@ -27,7 +27,86 @@ double clamp(double value, double low, double high)
 {
   return std::max(low, std::min(value, high));
 }
+
+Eigen::Quaterniond addQuaternions(
+  const Eigen::Quaterniond & lhs,
+  const Eigen::Quaterniond & rhs)
+{
+  return Eigen::Quaterniond(
+    lhs.w() + rhs.w(),
+    lhs.x() + rhs.x(),
+    lhs.y() + rhs.y(),
+    lhs.z() + rhs.z());
+}
+
+Eigen::Quaterniond scaleQuaternion(const Eigen::Quaterniond & q, double scale)
+{
+  return Eigen::Quaterniond(q.w() * scale, q.x() * scale, q.y() * scale, q.z() * scale);
+}
 }  // namespace
+
+DualQuaternion DualQuaternion::identity()
+{
+  return DualQuaternion{};
+}
+
+DualQuaternion DualQuaternion::fromTransform(const Eigen::Matrix4d & transform)
+{
+  Eigen::Quaterniond rotation(transform.block<3, 3>(0, 0));
+  rotation.normalize();
+  return fromRotationTranslation(rotation, transform.block<3, 1>(0, 3));
+}
+
+DualQuaternion DualQuaternion::fromRotationTranslation(
+  const Eigen::Quaterniond & rotation,
+  const Eigen::Vector3d & translation)
+{
+  DualQuaternion result;
+  result.real = rotation.normalized();
+  const Eigen::Quaterniond translation_quat(
+    0.0,
+    translation.x(),
+    translation.y(),
+    translation.z());
+  result.dual = scaleQuaternion(translation_quat * result.real, 0.5);
+  return result;
+}
+
+DualQuaternion DualQuaternion::normalized() const
+{
+  DualQuaternion result = *this;
+  const double norm = result.real.norm();
+  if (norm > 0.0) {
+    result.real.coeffs() /= norm;
+    result.dual.coeffs() /= norm;
+  }
+  return result;
+}
+
+DualQuaternion DualQuaternion::operator*(const DualQuaternion & other) const
+{
+  DualQuaternion result;
+  result.real = real * other.real;
+  result.dual = addQuaternions(real * other.dual, dual * other.real);
+  return result.normalized();
+}
+
+Eigen::Vector3d DualQuaternion::translation() const
+{
+  const DualQuaternion normalized_dq = normalized();
+  const Eigen::Quaterniond translation_quat =
+    scaleQuaternion(normalized_dq.dual * normalized_dq.real.conjugate(), 2.0);
+  return Eigen::Vector3d(translation_quat.x(), translation_quat.y(), translation_quat.z());
+}
+
+Eigen::Matrix4d DualQuaternion::toTransform() const
+{
+  const DualQuaternion normalized_dq = normalized();
+  Eigen::Matrix4d transform = Eigen::Matrix4d::Identity();
+  transform.block<3, 3>(0, 0) = normalized_dq.real.toRotationMatrix();
+  transform.block<3, 1>(0, 3) = normalized_dq.translation();
+  return transform;
+}
 
 SixAxisArmKinematics::SixAxisArmKinematics()
 : joint_names_({"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"})
@@ -66,6 +145,27 @@ Eigen::Matrix4d SixAxisArmKinematics::forward(const Vector6d & q) const
   transform *= translate(0.0, -(kD4 + kD6), 0.0);
 
   return transform;
+}
+
+DualQuaternion SixAxisArmKinematics::forwardDualQuaternion(const Vector6d & q) const
+{
+  DualQuaternion transform = DualQuaternion::identity();
+
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, 0.0, kD1) * rotate(Eigen::Vector3d::UnitZ(), q(0)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, 0.0, 0.0) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(1)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(kA2, 0.0, 0.0) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(2)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(kA3, 0.0, 0.0) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(3)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, -kD4, 0.0) * rotate(Eigen::Vector3d(0.0, 0.0, -1.0), q(4)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, kD4, -kD5) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(5)));
+  transform = transform * DualQuaternion::fromTransform(translate(0.0, -(kD4 + kD6), 0.0));
+
+  return transform.normalized();
 }
 
 Eigen::Matrix<double, 6, 1> SixAxisArmKinematics::poseError(
@@ -173,10 +273,10 @@ IkResult SixAxisArmKinematics::inverse(const Eigen::Matrix4d & target, const Vec
     }
 
     const bool better =
-      candidate.converged && !best.converged ||
-      candidate.converged == best.converged &&
-      candidate.position_error + candidate.orientation_error <
-      best.position_error + best.orientation_error;
+      (candidate.converged && !best.converged) ||
+      ((candidate.converged == best.converged) &&
+      (candidate.position_error + candidate.orientation_error <
+      best.position_error + best.orientation_error));
     if (better) {
       best = candidate;
     }
@@ -225,4 +325,3 @@ const Vector6d & SixAxisArmKinematics::upperLimits() const
 }
 
 }  // namespace robot_arm_kinematics
-
