@@ -10,38 +10,109 @@
   <xacro:property name="d4" value="0.1215" />
   <xacro:property name="d5" value="0.1025" />
   <xacro:property name="d6" value="0.094" />
-  <xacro:property name="d45_len" value="0.1590" />
+  <xacro:property name="d45_len" value="0.15896068696" />
+  <xacro:property name="d45_angle" value="0.87001704475" />
+  <!-- Reachable, non-singular front-center work pose. -->
+  <xacro:property name="initial_joint_1" value="-0.35" />
+  <xacro:property name="initial_joint_2" value="-1.0" />
+  <xacro:property name="initial_joint_3" value="1.55" />
+  <xacro:property name="initial_joint_4" value="-0.5" />
+  <xacro:property name="initial_joint_5" value="-0.35" />
+  <xacro:property name="initial_joint_6" value="-0.2" />
 
-  <xacro:macro name="simple_inertial" params="mass">
+  <xacro:macro name="cylinder_inertial" params="mass radius length xyz rpy">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="${xyz}" rpy="${rpy}" />
       <mass value="${mass}" />
-      <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.01" />
+      <inertia
+        ixx="${mass * (3.0 * radius * radius + length * length) / 12.0}"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="${mass * (3.0 * radius * radius + length * length) / 12.0}"
+        iyz="0.0"
+        izz="${0.5 * mass * radius * radius}" />
     </inertial>
   </xacro:macro>
 
+  <xacro:macro name="sphere_inertial" params="mass radius">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="${mass}" />
+      <inertia
+        ixx="${0.4 * mass * radius * radius}"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="${0.4 * mass * radius * radius}"
+        iyz="0.0"
+        izz="${0.4 * mass * radius * radius}" />
+    </inertial>
+  </xacro:macro>
+
+  <xacro:macro name="visual_cylinder" params="radius length xyz rpy material">
+    <visual>
+      <origin xyz="${xyz}" rpy="${rpy}" />
+      <geometry>
+        <cylinder radius="${radius}" length="${length}" />
+      </geometry>
+      <material name="${material}" />
+    </visual>
+  </xacro:macro>
+
+  <xacro:macro name="visual_sphere" params="radius xyz material">
+    <visual>
+      <origin xyz="${xyz}" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="${radius}" />
+      </geometry>
+      <material name="${material}" />
+    </visual>
+  </xacro:macro>
+
+  <xacro:macro name="visual_box" params="size xyz rpy material">
+    <visual>
+      <origin xyz="${xyz}" rpy="${rpy}" />
+      <geometry>
+        <box size="${size}" />
+      </geometry>
+      <material name="${material}" />
+    </visual>
+  </xacro:macro>
+
   <material name="base_dark">
-    <color rgba="0.08 0.10 0.12 1.0" />
+    <color rgba="0.045 0.055 0.065 1.0" />
+  </material>
+  <material name="graphite">
+    <color rgba="0.12 0.14 0.16 1.0" />
   </material>
   <material name="arm_blue">
-    <color rgba="0.12 0.42 0.78 1.0" />
+    <color rgba="0.06 0.36 0.78 1.0" />
   </material>
   <material name="arm_gray">
-    <color rgba="0.62 0.66 0.70 1.0" />
+    <color rgba="0.72 0.76 0.80 1.0" />
+  </material>
+  <material name="soft_white">
+    <color rgba="0.88 0.91 0.94 1.0" />
+  </material>
+  <material name="accent_blue">
+    <color rgba="0.00 0.62 0.95 1.0" />
+  </material>
+  <material name="joint_black">
+    <color rgba="0.015 0.018 0.022 1.0" />
   </material>
   <material name="tool_orange">
-    <color rgba="0.95 0.48 0.12 1.0" />
+    <color rgba="1.00 0.50 0.08 1.0" />
   </material>
 
+  <link name="world" />
+
   <link name="base_link">
-    <xacro:simple_inertial mass="3.0" />
-    <visual>
-      <origin xyz="0 0 0.035" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.13" length="0.07" />
-      </geometry>
-      <material name="base_dark" />
-    </visual>
+    <xacro:cylinder_inertial
+      mass="3.0" radius="0.13" length="0.07"
+      xyz="0 0 0.035" rpy="0 0 0" />
+    <xacro:visual_cylinder radius="0.165" length="0.030" xyz="0 0 0.015" rpy="0 0 0" material="base_dark" />
+    <xacro:visual_cylinder radius="0.135" length="0.050" xyz="0 0 0.050" rpy="0 0 0" material="graphite" />
+    <xacro:visual_cylinder radius="0.122" length="0.014" xyz="0 0 0.082" rpy="0 0 0" material="accent_blue" />
+    <xacro:visual_cylinder radius="0.092" length="0.020" xyz="0 0 0.098" rpy="0 0 0" material="arm_gray" />
     <collision>
       <origin xyz="0 0 0.035" rpy="0 0 0" />
       <geometry>
@@ -51,14 +122,13 @@
   </link>
 
   <link name="link_1">
-    <xacro:simple_inertial mass="1.5" />
-    <visual>
-      <origin xyz="0 0 ${-d1 / 2.0}" rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.055" length="${d1}" />
-      </geometry>
-      <material name="arm_blue" />
-    </visual>
+    <xacro:cylinder_inertial
+      mass="1.5" radius="0.055" length="${d1}"
+      xyz="0 0 ${-d1 / 2.0}" rpy="0 0 0" />
+    <xacro:visual_cylinder radius="0.055" length="${d1}" xyz="0 0 ${-d1 / 2.0}" rpy="0 0 0" material="arm_blue" />
+    <xacro:visual_cylinder radius="0.070" length="0.026" xyz="0 0 -0.010" rpy="0 0 0" material="joint_black" />
+    <xacro:visual_cylinder radius="0.068" length="0.020" xyz="0 0 ${-d1 + 0.010}" rpy="0 0 0" material="arm_gray" />
+    <xacro:visual_box size="0.030 0.012 ${d1 * 0.72}" xyz="0.048 0 ${-d1 / 2.0}" rpy="0 0 0" material="accent_blue" />
     <collision>
       <origin xyz="0 0 ${-d1 / 2.0}" rpy="0 0 0" />
       <geometry>
@@ -68,14 +138,14 @@
   </link>
 
   <link name="link_2">
-    <xacro:simple_inertial mass="1.5" />
-    <visual>
-      <origin xyz="${a2 / 2.0} 0 0" rpy="0 1.57079632679 0" />
-      <geometry>
-        <cylinder radius="0.04" length="${a2_len}" />
-      </geometry>
-      <material name="arm_gray" />
-    </visual>
+    <xacro:cylinder_inertial
+      mass="1.5" radius="0.04" length="${a2_len}"
+      xyz="${a2 / 2.0} 0 0" rpy="0 1.57079632679 0" />
+    <xacro:visual_box size="${a2_len * 0.92} 0.074 0.038" xyz="${a2 / 2.0} 0 0" rpy="0 0 0" material="soft_white" />
+    <xacro:visual_cylinder radius="0.024" length="${a2_len}" xyz="${a2 / 2.0} 0.030 0" rpy="0 1.57079632679 0" material="arm_blue" />
+    <xacro:visual_cylinder radius="0.024" length="${a2_len}" xyz="${a2 / 2.0} -0.030 0" rpy="0 1.57079632679 0" material="arm_blue" />
+    <xacro:visual_sphere radius="0.067" xyz="0 0 0" material="joint_black" />
+    <xacro:visual_sphere radius="0.058" xyz="${a2} 0 0" material="arm_gray" />
     <collision>
       <origin xyz="${a2 / 2.0} 0 0" rpy="0 1.57079632679 0" />
       <geometry>
@@ -85,14 +155,14 @@
   </link>
 
   <link name="link_3">
-    <xacro:simple_inertial mass="1.2" />
-    <visual>
-      <origin xyz="${a3 / 2.0} 0 0" rpy="0 1.57079632679 0" />
-      <geometry>
-        <cylinder radius="0.035" length="${a3_len}" />
-      </geometry>
-      <material name="arm_blue" />
-    </visual>
+    <xacro:cylinder_inertial
+      mass="1.2" radius="0.035" length="${a3_len}"
+      xyz="${a3 / 2.0} 0 0" rpy="0 1.57079632679 0" />
+    <xacro:visual_box size="${a3_len * 0.90} 0.060 0.032" xyz="${a3 / 2.0} 0 0" rpy="0 0 0" material="arm_blue" />
+    <xacro:visual_cylinder radius="0.018" length="${a3_len}" xyz="${a3 / 2.0} 0.026 0.020" rpy="0 1.57079632679 0" material="soft_white" />
+    <xacro:visual_cylinder radius="0.018" length="${a3_len}" xyz="${a3 / 2.0} -0.026 0.020" rpy="0 1.57079632679 0" material="soft_white" />
+    <xacro:visual_sphere radius="0.055" xyz="0 0 0" material="arm_gray" />
+    <xacro:visual_sphere radius="0.048" xyz="${a3} 0 0" material="joint_black" />
     <collision>
       <origin xyz="${a3 / 2.0} 0 0" rpy="0 1.57079632679 0" />
       <geometry>
@@ -102,14 +172,12 @@
   </link>
 
   <link name="link_4">
-    <xacro:simple_inertial mass="0.9" />
-    <visual>
-      <origin xyz="0 ${-d4 / 2.0} 0" rpy="1.57079632679 0 0" />
-      <geometry>
-        <cylinder radius="0.032" length="${d4}" />
-      </geometry>
-      <material name="arm_gray" />
-    </visual>
+    <xacro:cylinder_inertial
+      mass="0.9" radius="0.032" length="${d4}"
+      xyz="0 ${-d4 / 2.0} 0" rpy="1.57079632679 0 0" />
+    <xacro:visual_cylinder radius="0.036" length="${d4}" xyz="0 ${-d4 / 2.0} 0" rpy="1.57079632679 0 0" material="arm_gray" />
+    <xacro:visual_cylinder radius="0.048" length="0.030" xyz="0 -0.010 0" rpy="1.57079632679 0 0" material="joint_black" />
+    <xacro:visual_cylinder radius="0.044" length="0.028" xyz="0 ${-d4 + 0.014} 0" rpy="1.57079632679 0 0" material="accent_blue" />
     <collision>
       <origin xyz="0 ${-d4 / 2.0} 0" rpy="1.57079632679 0 0" />
       <geometry>
@@ -119,16 +187,15 @@
   </link>
 
   <link name="link_5">
-    <xacro:simple_inertial mass="0.8" />
-    <visual>
-      <origin xyz="0 ${d4 / 2.0} ${-d5 / 2.0}" rpy="0.78539816339 0 0" />
-      <geometry>
-        <cylinder radius="0.03" length="${d45_len}" />
-      </geometry>
-      <material name="arm_blue" />
-    </visual>
+    <xacro:cylinder_inertial
+      mass="0.8" radius="0.03" length="${d45_len}"
+      xyz="0 ${d4 / 2.0} ${-d5 / 2.0}" rpy="${d45_angle} 0 0" />
+    <xacro:visual_cylinder radius="0.032" length="${d45_len}" xyz="0 ${d4 / 2.0} ${-d5 / 2.0}" rpy="${d45_angle} 0 0" material="arm_blue" />
+    <xacro:visual_cylinder radius="0.020" length="${d45_len * 0.78}" xyz="0.028 ${d4 / 2.0} ${-d5 / 2.0}" rpy="${d45_angle} 0 0" material="soft_white" />
+    <xacro:visual_cylinder radius="0.020" length="${d45_len * 0.78}" xyz="-0.028 ${d4 / 2.0} ${-d5 / 2.0}" rpy="${d45_angle} 0 0" material="soft_white" />
+    <xacro:visual_sphere radius="0.044" xyz="0 0 0" material="joint_black" />
     <collision>
-      <origin xyz="0 ${d4 / 2.0} ${-d5 / 2.0}" rpy="0.78539816339 0 0" />
+      <origin xyz="0 ${d4 / 2.0} ${-d5 / 2.0}" rpy="${d45_angle} 0 0" />
       <geometry>
         <cylinder radius="0.03" length="${d45_len}" />
       </geometry>
@@ -136,14 +203,13 @@
   </link>
 
   <link name="link_6">
-    <xacro:simple_inertial mass="0.6" />
-    <visual>
-      <origin xyz="0 ${-(d4 + d6) / 2.0} 0" rpy="1.57079632679 0 0" />
-      <geometry>
-        <cylinder radius="0.026" length="${d4 + d6}" />
-      </geometry>
-      <material name="tool_orange" />
-    </visual>
+    <xacro:cylinder_inertial
+      mass="0.6" radius="0.026" length="${d4 + d6}"
+      xyz="0 ${-(d4 + d6) / 2.0} 0" rpy="1.57079632679 0 0" />
+    <xacro:visual_cylinder radius="0.027" length="${d4 + d6}" xyz="0 ${-(d4 + d6) / 2.0} 0" rpy="1.57079632679 0 0" material="graphite" />
+    <xacro:visual_cylinder radius="0.039" length="0.036" xyz="0 -0.018 0" rpy="1.57079632679 0 0" material="arm_gray" />
+    <xacro:visual_cylinder radius="0.034" length="0.052" xyz="0 ${-(d4 + d6) + 0.026} 0" rpy="1.57079632679 0 0" material="tool_orange" />
+    <xacro:visual_box size="0.012 0.120 0.018" xyz="0.027 ${-(d4 + d6) / 2.0} 0.028" rpy="0 0 0" material="accent_blue" />
     <collision>
       <origin xyz="0 ${-(d4 + d6) / 2.0} 0" rpy="1.57079632679 0 0" />
       <geometry>
@@ -153,14 +219,12 @@
   </link>
 
   <link name="tool0">
-    <xacro:simple_inertial mass="0.1" />
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <sphere radius="0.035" />
-      </geometry>
-      <material name="tool_orange" />
-    </visual>
+    <xacro:sphere_inertial mass="0.1" radius="0.035" />
+    <xacro:visual_sphere radius="0.035" xyz="0 0 0" material="tool_orange" />
+    <xacro:visual_cylinder radius="0.043" length="0.018" xyz="0 0.006 0" rpy="1.57079632679 0 0" material="arm_gray" />
+    <xacro:visual_box size="0.014 0.070 0.018" xyz="0.026 -0.040 0" rpy="0 0 0" material="joint_black" />
+    <xacro:visual_box size="0.014 0.070 0.018" xyz="-0.026 -0.040 0" rpy="0 0 0" material="joint_black" />
+    <xacro:visual_box size="0.070 0.014 0.016" xyz="0 -0.010 0" rpy="0 0 0" material="arm_gray" />
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
@@ -169,12 +233,19 @@
     </collision>
   </link>
 
+  <joint name="world_fixed" type="fixed">
+    <parent link="world" />
+    <child link="base_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+
   <joint name="joint_1" type="revolute">
     <parent link="base_link" />
     <child link="link_1" />
     <origin xyz="0 0 ${d1}" rpy="0 0 0" />
     <axis xyz="0 0 1" />
     <limit lower="-3.14159" upper="3.14159" effort="60" velocity="1.5" />
+    <dynamics damping="1.0" friction="0.05" />
   </joint>
 
   <joint name="joint_2" type="revolute">
@@ -183,6 +254,7 @@
     <origin xyz="0 0 0" rpy="0 0 0" />
     <axis xyz="0 -1 0" />
     <limit lower="-2.61799" upper="2.61799" effort="60" velocity="1.5" />
+    <dynamics damping="1.2" friction="0.05" />
   </joint>
 
   <joint name="joint_3" type="revolute">
@@ -191,6 +263,7 @@
     <origin xyz="${a2} 0 0" rpy="0 0 0" />
     <axis xyz="0 -1 0" />
     <limit lower="-2.61799" upper="2.61799" effort="45" velocity="1.5" />
+    <dynamics damping="1.0" friction="0.04" />
   </joint>
 
   <joint name="joint_4" type="revolute">
@@ -199,6 +272,7 @@
     <origin xyz="${a3} 0 0" rpy="0 0 0" />
     <axis xyz="0 -1 0" />
     <limit lower="-3.14159" upper="3.14159" effort="35" velocity="2.0" />
+    <dynamics damping="0.7" friction="0.03" />
   </joint>
 
   <joint name="joint_5" type="revolute">
@@ -207,6 +281,7 @@
     <origin xyz="0 ${-d4} 0" rpy="0 0 0" />
     <axis xyz="0 0 -1" />
     <limit lower="-3.14159" upper="3.14159" effort="25" velocity="2.0" />
+    <dynamics damping="0.5" friction="0.02" />
   </joint>
 
   <joint name="joint_6" type="revolute">
@@ -215,6 +290,7 @@
     <origin xyz="0 ${d4} ${-d5}" rpy="0 0 0" />
     <axis xyz="0 -1 0" />
     <limit lower="-3.14159" upper="3.14159" effort="20" velocity="2.5" />
+    <dynamics damping="0.35" friction="0.02" />
   </joint>
 
   <joint name="tool0_fixed" type="fixed">
@@ -229,32 +305,44 @@
     </hardware>
     <joint name="joint_1">
       <command_interface name="position" />
-      <state_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">${initial_joint_1}</param>
+      </state_interface>
       <state_interface name="velocity" />
     </joint>
     <joint name="joint_2">
       <command_interface name="position" />
-      <state_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">${initial_joint_2}</param>
+      </state_interface>
       <state_interface name="velocity" />
     </joint>
     <joint name="joint_3">
       <command_interface name="position" />
-      <state_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">${initial_joint_3}</param>
+      </state_interface>
       <state_interface name="velocity" />
     </joint>
     <joint name="joint_4">
       <command_interface name="position" />
-      <state_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">${initial_joint_4}</param>
+      </state_interface>
       <state_interface name="velocity" />
     </joint>
     <joint name="joint_5">
       <command_interface name="position" />
-      <state_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">${initial_joint_5}</param>
+      </state_interface>
       <state_interface name="velocity" />
     </joint>
     <joint name="joint_6">
       <command_interface name="position" />
-      <state_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">${initial_joint_6}</param>
+      </state_interface>
       <state_interface name="velocity" />
     </joint>
   </ros2_control>
@@ -262,6 +350,12 @@
   <gazebo>
     <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
       <parameters>$(arg controllers_file)</parameters>
+      <hold_joints>true</hold_joints>
+      <position_proportional_gain>0.1</position_proportional_gain>
     </plugin>
+  </gazebo>
+
+  <gazebo reference="world_fixed">
+    <preserveFixedJoint>true</preserveFixedJoint>
   </gazebo>
 </robot>

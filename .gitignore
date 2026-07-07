@@ -4,4 +4,10 @@ log/
 .colcon/
 *.pyc
 __pycache__/
-
+.pydeps/
+.mplconfig/
+.tmp_formula_check/
+docs/.qa_*/
+docs/~$*.docx
+docs/figures/*.tiff
+src.zip

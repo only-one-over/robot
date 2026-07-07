@@ -1,5 +1,6 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -47,6 +48,14 @@ def generate_launch_description():
         launch_arguments={"gz_args": ["-r ", world_file]}.items(),
     )
 
+    clock_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        name="clock_bridge",
+        output="screen",
+        arguments=["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"],
+    )
+
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
@@ -71,21 +80,33 @@ def generate_launch_description():
             "-y",
             "0",
             "-z",
-            "0.02",
+            "0.0",
         ],
     )
 
     joint_state_broadcaster = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
+        arguments=[
+            "joint_state_broadcaster",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         output="screen",
     )
 
     trajectory_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["joint_trajectory_controller", "--controller-manager", "/controller_manager"],
+        arguments=[
+            "joint_trajectory_controller",
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-manager-timeout",
+            "60",
+        ],
         output="screen",
     )
 
@@ -98,10 +119,25 @@ def generate_launch_description():
 
     return LaunchDescription([
         gazebo,
+        clock_bridge,
         robot_state_publisher,
         spawn_robot,
-        TimerAction(period=3.0, actions=[joint_state_broadcaster]),
-        TimerAction(period=4.0, actions=[trajectory_controller]),
-        TimerAction(period=5.0, actions=[kinematics_node]),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=spawn_robot,
+                on_exit=[joint_state_broadcaster],
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=joint_state_broadcaster,
+                on_exit=[trajectory_controller],
+            )
+        ),
+        RegisterEventHandler(
+            OnProcessExit(
+                target_action=trajectory_controller,
+                on_exit=[kinematics_node],
+            )
+        ),
     ])
-

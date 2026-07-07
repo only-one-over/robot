@@ -161,7 +161,8 @@ private:
   void createMarker()
   {
     Vector6d q;
-    q << 0.2, 0.35, -0.55, 0.75, -0.35, 0.25;
+    // A reachable, non-singular front-center work pose.
+    q << -0.35, -1.0, 1.55, -0.5, -0.35, -0.2;
     current_pose_ = matrixToPoseMsg(kinematics_.forward(q));
 
     InteractiveMarker marker;

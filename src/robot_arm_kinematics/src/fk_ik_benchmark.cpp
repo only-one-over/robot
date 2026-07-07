@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +31,21 @@ struct RunningStats
   {
     return count == 0 ? 0.0 : sum / static_cast<double>(count);
   }
+};
+
+struct MethodStats
+{
+  MethodStats(robot_arm_kinematics::IkMethod selected_method)
+  : method(selected_method)
+  {
+  }
+
+  robot_arm_kinematics::IkMethod method;
+  RunningStats position;
+  RunningStats orientation;
+  RunningStats iterations;
+  RunningStats runtime_ms;
+  int successes{0};
 };
 
 int parseIntArg(int argc, char ** argv, const std::string & name, int fallback)
@@ -88,10 +104,10 @@ int main(int argc, char ** argv)
 
   RunningStats fk_dq_position;
   RunningStats fk_dq_orientation;
-  RunningStats ik_position;
-  RunningStats ik_orientation;
-  RunningStats ik_iterations;
-  int ik_successes = 0;
+  std::array<MethodStats, 3> method_stats{{
+    {robot_arm_kinematics::IkMethod::kJacobianTranspose},
+    {robot_arm_kinematics::IkMethod::kPseudoinverse},
+    {robot_arm_kinematics::IkMethod::kDampedLeastSquares}}};
 
   for (int sample = 0; sample < samples; ++sample) {
     robot_arm_kinematics::Vector6d q;
@@ -114,18 +130,23 @@ int main(int argc, char ** argv)
         upper(joint));
     }
 
-    const auto ik = kinematics.inverse(matrix_fk, ik_seed);
-    const Eigen::Matrix4d recovered = kinematics.forward(ik.joints);
-    const double position_error =
-      (matrix_fk.block<3, 1>(0, 3) - recovered.block<3, 1>(0, 3)).norm();
-    const double orientation_error =
-      robot_arm_kinematics::SixAxisArmKinematics::orientationErrorNorm(matrix_fk, recovered);
+    for (auto & stats : method_stats) {
+      const auto start = std::chrono::steady_clock::now();
+      const auto ik = kinematics.inverseWithMethod(matrix_fk, ik_seed, stats.method);
+      const auto stop = std::chrono::steady_clock::now();
+      stats.runtime_ms.add(
+        std::chrono::duration<double, std::milli>(stop - start).count());
 
-    if (ik.converged) {
-      ++ik_successes;
-      ik_position.add(position_error);
-      ik_orientation.add(orientation_error);
-      ik_iterations.add(static_cast<double>(ik.iterations));
+      if (ik.converged) {
+        const Eigen::Matrix4d recovered = kinematics.forward(ik.joints);
+        ++stats.successes;
+        stats.position.add(
+          (matrix_fk.block<3, 1>(0, 3) - recovered.block<3, 1>(0, 3)).norm());
+        stats.orientation.add(
+          robot_arm_kinematics::SixAxisArmKinematics::orientationErrorNorm(
+            matrix_fk, recovered));
+        stats.iterations.add(static_cast<double>(ik.iterations));
+      }
     }
   }
 
@@ -133,8 +154,11 @@ int main(int argc, char ** argv)
   unreachable(0, 3) = 5.0;
   unreachable(1, 3) = 0.0;
   unreachable(2, 3) = 5.0;
-  const auto unreachable_ik =
-    kinematics.inverse(unreachable, robot_arm_kinematics::Vector6d::Zero());
+  std::array<robot_arm_kinematics::IkResult, 3> unreachable_results;
+  for (std::size_t i = 0; i < method_stats.size(); ++i) {
+    unreachable_results[i] = kinematics.inverseWithMethod(
+      unreachable, robot_arm_kinematics::Vector6d::Zero(), method_stats[i].method);
+  }
 
   std::cout << std::setprecision(10) << std::boolalpha;
   std::cout << "fk_ik_benchmark" << std::endl;
@@ -145,24 +169,37 @@ int main(int argc, char ** argv)
   std::cout << "fk_dq_position_error_max_m: " << fk_dq_position.max << std::endl;
   std::cout << "fk_dq_orientation_error_mean_rad: " << fk_dq_orientation.mean() << std::endl;
   std::cout << "fk_dq_orientation_error_max_rad: " << fk_dq_orientation.max << std::endl;
-  std::cout << "ik_success_count: " << ik_successes << std::endl;
-  std::cout << "ik_success_rate: " << static_cast<double>(ik_successes) /
-    static_cast<double>(samples) << std::endl;
-  std::cout << "ik_success_rate_min_required: 0.9" << std::endl;
-  std::cout << "ik_position_error_mean_m: " << ik_position.mean() << std::endl;
-  std::cout << "ik_position_error_max_m: " << ik_position.max << std::endl;
-  std::cout << "ik_orientation_error_mean_rad: " << ik_orientation.mean() << std::endl;
-  std::cout << "ik_orientation_error_max_rad: " << ik_orientation.max << std::endl;
-  std::cout << "ik_iterations_mean: " << ik_iterations.mean() << std::endl;
-  std::cout << "unreachable_target_converged: " << unreachable_ik.converged << std::endl;
-  std::cout << "unreachable_position_error_m: " << unreachable_ik.position_error << std::endl;
-  std::cout << "unreachable_orientation_error_rad: " << unreachable_ik.orientation_error
-            << std::endl;
+  for (std::size_t i = 0; i < method_stats.size(); ++i) {
+    const auto & stats = method_stats[i];
+    const auto & unreachable_result = unreachable_results[i];
+    const std::string prefix =
+      robot_arm_kinematics::SixAxisArmKinematics::ikMethodName(stats.method);
+    std::cout << prefix << "_success_count: " << stats.successes << std::endl;
+    std::cout << prefix << "_success_rate: " <<
+      static_cast<double>(stats.successes) / static_cast<double>(samples) << std::endl;
+    std::cout << prefix << "_position_error_mean_m: " << stats.position.mean() << std::endl;
+    std::cout << prefix << "_position_error_max_m: " << stats.position.max << std::endl;
+    std::cout << prefix << "_orientation_error_mean_rad: " <<
+      stats.orientation.mean() << std::endl;
+    std::cout << prefix << "_orientation_error_max_rad: " <<
+      stats.orientation.max << std::endl;
+    std::cout << prefix << "_iterations_mean: " << stats.iterations.mean() << std::endl;
+    std::cout << prefix << "_runtime_mean_ms: " << stats.runtime_ms.mean() << std::endl;
+    std::cout << prefix << "_unreachable_converged: " <<
+      unreachable_result.converged << std::endl;
+    std::cout << prefix << "_unreachable_position_error_m: " <<
+      unreachable_result.position_error << std::endl;
+    std::cout << prefix << "_unreachable_orientation_error_rad: " <<
+      unreachable_result.orientation_error << std::endl;
+  }
 
   const bool fk_dq_ok = fk_dq_position.max < 1.0e-9 && fk_dq_orientation.max < 1.0e-7;
-  const bool ik_ok = ik_successes > 0 && ik_position.max < 0.005 &&
-    ik_orientation.max < 3.0 * M_PI / 180.0 &&
-    static_cast<double>(ik_successes) / static_cast<double>(samples) >= 0.9;
-  const bool unreachable_ok = !unreachable_ik.converged;
+  const auto & dls = method_stats[2];
+  const bool ik_ok = dls.successes > 0 && dls.position.max < 0.005 &&
+    dls.orientation.max < 3.0 * M_PI / 180.0 &&
+    static_cast<double>(dls.successes) / static_cast<double>(samples) >= 0.9;
+  const bool unreachable_ok = std::all_of(
+    unreachable_results.begin(), unreachable_results.end(),
+    [](const auto & result) {return !result.converged;});
   return fk_dq_ok && ik_ok && unreachable_ok ? 0 : 1;
 }
