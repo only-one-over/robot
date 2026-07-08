@@ -1,0 +1,4 @@
+method,success_count,sample_count,success_rate,position_error_mean_m,position_error_max_m,orientation_error_mean_rad,orientation_error_max_rad,iterations_mean,runtime_mean_ms,unreachable_converged
+Jacobian transpose,873,1000,0.873,0.004883124103,0.004999617589,0.002058541657,0.05147768022,85.65750286,22.29479725,false
+Moore-Penrose pseudoinverse,987,1000,0.987,0.001266100415,0.004992358909,0.003594363854,0.05004065718,2.234042553,1.679377923,false
+Damped least squares,1000,1000,1.000,0.002552569429,0.004991494831,0.002489041175,0.04915522324,2.169,0.620846898,false

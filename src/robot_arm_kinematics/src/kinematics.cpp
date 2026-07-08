@@ -22,12 +22,92 @@ constexpr double kPositionTolerance = 0.005;
 constexpr double kOrientationTolerance = 3.0 * kPi / 180.0;
 constexpr double kDamping = 0.08;
 constexpr double kMaxStep = 0.18;
+constexpr double kPseudoinverseRelativeTolerance = 1.0e-5;
 
 double clamp(double value, double low, double high)
 {
   return std::max(low, std::min(value, high));
 }
+
+Eigen::Quaterniond addQuaternions(
+  const Eigen::Quaterniond & lhs,
+  const Eigen::Quaterniond & rhs)
+{
+  return Eigen::Quaterniond(
+    lhs.w() + rhs.w(),
+    lhs.x() + rhs.x(),
+    lhs.y() + rhs.y(),
+    lhs.z() + rhs.z());
+}
+
+Eigen::Quaterniond scaleQuaternion(const Eigen::Quaterniond & q, double scale)
+{
+  return Eigen::Quaterniond(q.w() * scale, q.x() * scale, q.y() * scale, q.z() * scale);
+}
 }  // namespace
+
+DualQuaternion DualQuaternion::identity()
+{
+  return DualQuaternion{};
+}
+
+DualQuaternion DualQuaternion::fromTransform(const Eigen::Matrix4d & transform)
+{
+  Eigen::Quaterniond rotation(transform.block<3, 3>(0, 0));
+  rotation.normalize();
+  return fromRotationTranslation(rotation, transform.block<3, 1>(0, 3));
+}
+
+DualQuaternion DualQuaternion::fromRotationTranslation(
+  const Eigen::Quaterniond & rotation,
+  const Eigen::Vector3d & translation)
+{
+  DualQuaternion result;
+  result.real = rotation.normalized();
+  const Eigen::Quaterniond translation_quat(
+    0.0,
+    translation.x(),
+    translation.y(),
+    translation.z());
+  result.dual = scaleQuaternion(translation_quat * result.real, 0.5);
+  return result;
+}
+
+DualQuaternion DualQuaternion::normalized() const
+{
+  DualQuaternion result = *this;
+  const double norm = result.real.norm();
+  if (norm > 0.0) {
+    result.real.coeffs() /= norm;
+    result.dual.coeffs() /= norm;
+  }
+  return result;
+}
+
+DualQuaternion DualQuaternion::operator*(const DualQuaternion & other) const
+{
+  DualQuaternion result;
+  result.real = real * other.real;
+  result.dual = addQuaternions(real * other.dual, dual * other.real);
+  return result.normalized();
+}
+
+Eigen::Vector3d DualQuaternion::translation() const
+{
+  const DualQuaternion normalized_dq = normalized();
+  const Eigen::Quaterniond translation_quat =
+    scaleQuaternion(normalized_dq.dual * normalized_dq.real.conjugate(), 2.0);
+  return Eigen::Vector3d(translation_quat.x(), translation_quat.y(), translation_quat.z());
+}
+
+Eigen::Matrix4d DualQuaternion::toTransform() const
+{
+  const DualQuaternion normalized_dq = normalized();
+  Eigen::Matrix4d transform = Eigen::Matrix4d::Identity();
+  transform.block<3, 3>(0, 0) = normalized_dq.real.toRotationMatrix();
+  transform.block<3, 1>(0, 3) = normalized_dq.translation();
+  return transform;
+}
 
 SixAxisArmKinematics::SixAxisArmKinematics()
 : joint_names_({"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"})
@@ -68,6 +148,27 @@ Eigen::Matrix4d SixAxisArmKinematics::forward(const Vector6d & q) const
   return transform;
 }
 
+DualQuaternion SixAxisArmKinematics::forwardDualQuaternion(const Vector6d & q) const
+{
+  DualQuaternion transform = DualQuaternion::identity();
+
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, 0.0, kD1) * rotate(Eigen::Vector3d::UnitZ(), q(0)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, 0.0, 0.0) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(1)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(kA2, 0.0, 0.0) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(2)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(kA3, 0.0, 0.0) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(3)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, -kD4, 0.0) * rotate(Eigen::Vector3d(0.0, 0.0, -1.0), q(4)));
+  transform = transform * DualQuaternion::fromTransform(
+    translate(0.0, kD4, -kD5) * rotate(Eigen::Vector3d(0.0, -1.0, 0.0), q(5)));
+  transform = transform * DualQuaternion::fromTransform(translate(0.0, -(kD4 + kD6), 0.0));
+
+  return transform.normalized();
+}
+
 Eigen::Matrix<double, 6, 1> SixAxisArmKinematics::poseError(
   const Eigen::Matrix4d & target,
   const Eigen::Matrix4d & actual)
@@ -105,7 +206,91 @@ Vector6d SixAxisArmKinematics::clampToLimits(const Vector6d & q) const
   return clamped;
 }
 
+Matrix6d SixAxisArmKinematics::numericalJacobian(
+  const Eigen::Matrix4d & target,
+  const Vector6d & q,
+  const Vector6d & error) const
+{
+  Matrix6d jacobian;
+  for (int column = 0; column < 6; ++column) {
+    const double forward_step = std::min(
+      kFiniteDifferenceStep, upper_limits_(column) - q(column));
+    const double backward_step = std::max(
+      -kFiniteDifferenceStep, lower_limits_(column) - q(column));
+    const double step =
+      forward_step > 1.0e-12 ? forward_step : backward_step;
+
+    if (std::abs(step) <= 1.0e-12) {
+      jacobian.col(column).setZero();
+      continue;
+    }
+
+    Vector6d q_perturbed = q;
+    q_perturbed(column) += step;
+    const Vector6d error_perturbed = poseError(target, forward(q_perturbed));
+    jacobian.col(column) = (error_perturbed - error) / step;
+  }
+  return jacobian;
+}
+
+Vector6d SixAxisArmKinematics::calculateIkStep(
+  const Matrix6d & jacobian,
+  const Vector6d & error,
+  IkMethod method) const
+{
+  if (method == IkMethod::kJacobianTranspose) {
+    const Vector6d gradient = jacobian.transpose() * error;
+    const Vector6d projected_gradient = jacobian * gradient;
+    const double denominator = projected_gradient.squaredNorm();
+    const double gain = denominator > 1.0e-14 ?
+      gradient.squaredNorm() / denominator : 0.0;
+    return -gain * gradient;
+  }
+
+  if (method == IkMethod::kPseudoinverse) {
+    const Eigen::JacobiSVD<Matrix6d> svd(
+      jacobian, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    const Vector6d singular_values = svd.singularValues();
+    const double threshold =
+      kPseudoinverseRelativeTolerance * singular_values.maxCoeff();
+    Vector6d inverse_singular_values = Vector6d::Zero();
+    for (int i = 0; i < 6; ++i) {
+      if (singular_values(i) > threshold) {
+        inverse_singular_values(i) = 1.0 / singular_values(i);
+      }
+    }
+    return -svd.matrixV() * inverse_singular_values.asDiagonal() *
+           svd.matrixU().transpose() * error;
+  }
+
+  const Matrix6d normal =
+    jacobian * jacobian.transpose() + kDamping * kDamping * Matrix6d::Identity();
+  return -jacobian.transpose() * normal.ldlt().solve(error);
+}
+
+const char * SixAxisArmKinematics::ikMethodName(IkMethod method)
+{
+  switch (method) {
+    case IkMethod::kJacobianTranspose:
+      return "jacobian_transpose";
+    case IkMethod::kPseudoinverse:
+      return "pseudoinverse";
+    case IkMethod::kDampedLeastSquares:
+      return "damped_least_squares";
+  }
+  return "unknown";
+}
+
 IkResult SixAxisArmKinematics::inverse(const Eigen::Matrix4d & target, const Vector6d & seed) const
+{
+  return inverseWithMethod(target, seed, IkMethod::kDampedLeastSquares, true);
+}
+
+IkResult SixAxisArmKinematics::inverseWithMethod(
+  const Eigen::Matrix4d & target,
+  const Vector6d & seed,
+  IkMethod method,
+  bool use_multi_start) const
 {
   IkResult best;
   best.joints = clampToLimits(seed);
@@ -114,13 +299,15 @@ IkResult SixAxisArmKinematics::inverse(const Eigen::Matrix4d & target, const Vec
 
   std::vector<Vector6d> seeds;
   seeds.push_back(clampToLimits(seed));
-  seeds.push_back(Vector6d::Zero());
-  Vector6d elbow_up = Vector6d::Zero();
-  elbow_up << 0.0, 0.6, -0.8, 0.4, 0.0, 0.0;
-  seeds.push_back(elbow_up);
-  Vector6d elbow_down = Vector6d::Zero();
-  elbow_down << 0.0, -0.6, 0.8, -0.4, 0.0, 0.0;
-  seeds.push_back(elbow_down);
+  if (use_multi_start) {
+    seeds.push_back(Vector6d::Zero());
+    Vector6d elbow_up = Vector6d::Zero();
+    elbow_up << 0.0, 0.6, -0.8, 0.4, 0.0, 0.0;
+    seeds.push_back(elbow_up);
+    Vector6d elbow_down = Vector6d::Zero();
+    elbow_down << 0.0, -0.6, 0.8, -0.4, 0.0, 0.0;
+    seeds.push_back(elbow_down);
+  }
 
   for (const auto & initial_seed : seeds) {
     Vector6d q = clampToLimits(initial_seed);
@@ -140,22 +327,12 @@ IkResult SixAxisArmKinematics::inverse(const Eigen::Matrix4d & target, const Vec
 
       if (position_error < kPositionTolerance && orientation_error < kOrientationTolerance) {
         candidate.converged = true;
-        candidate.message = "IK converged";
+        candidate.message = std::string(ikMethodName(method)) + " IK converged";
         break;
       }
 
-      Matrix6d jacobian;
-      for (int column = 0; column < 6; ++column) {
-        Vector6d q_plus = q;
-        q_plus(column) += kFiniteDifferenceStep;
-        q_plus = clampToLimits(q_plus);
-        const Eigen::Matrix<double, 6, 1> error_plus = poseError(target, forward(q_plus));
-        jacobian.col(column) = (error_plus - error) / kFiniteDifferenceStep;
-      }
-
-      const Matrix6d normal =
-        jacobian * jacobian.transpose() + kDamping * kDamping * Matrix6d::Identity();
-      Vector6d delta = -jacobian.transpose() * normal.ldlt().solve(error);
+      const Matrix6d jacobian = numericalJacobian(target, q, error);
+      Vector6d delta = calculateIkStep(jacobian, error, method);
 
       for (int i = 0; i < 6; ++i) {
         delta(i) = clamp(delta(i), -kMaxStep, kMaxStep);
@@ -169,14 +346,14 @@ IkResult SixAxisArmKinematics::inverse(const Eigen::Matrix4d & target, const Vec
       candidate.joints = q;
       candidate.position_error = (target.block<3, 1>(0, 3) - actual.block<3, 1>(0, 3)).norm();
       candidate.orientation_error = orientationErrorNorm(target, actual);
-      candidate.message = "IK did not converge";
+      candidate.message = std::string(ikMethodName(method)) + " IK did not converge";
     }
 
     const bool better =
-      candidate.converged && !best.converged ||
-      candidate.converged == best.converged &&
-      candidate.position_error + candidate.orientation_error <
-      best.position_error + best.orientation_error;
+      (candidate.converged && !best.converged) ||
+      ((candidate.converged == best.converged) &&
+      (candidate.position_error + candidate.orientation_error <
+      best.position_error + best.orientation_error));
     if (better) {
       best = candidate;
     }
@@ -225,4 +402,3 @@ const Vector6d & SixAxisArmKinematics::upperLimits() const
 }
 
 }  // namespace robot_arm_kinematics
-

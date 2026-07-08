@@ -40,11 +40,11 @@ public:
     publisher_ = create_publisher<geometry_msgs::msg::PoseStamped>("/target_pose", 10);
 
     Vector6d q1;
-    q1 << 0.2, 0.35, -0.55, 0.75, -0.35, 0.25;
+    q1 << 0.25, -0.7, 1.25, -0.45, 0.3, 0.2;
     Vector6d q2;
-    q2 << -0.35, 0.55, -0.45, 0.35, 0.45, -0.2;
+    q2 << -0.35, -1.0, 1.55, -0.5, -0.35, -0.2;
     Vector6d q3;
-    q3 << 0.5, 0.25, -0.7, 0.85, 0.25, 0.35;
+    q3 << 0.5, -0.75, 1.3, -0.5, 0.25, 0.35;
     targets_ = {q1, q2, q3};
 
     timer_ = create_wall_timer(
@@ -91,4 +91,3 @@ int main(int argc, char ** argv)
   rclcpp::shutdown();
   return 0;
 }
-
